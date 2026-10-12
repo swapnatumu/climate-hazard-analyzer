@@ -7,7 +7,7 @@ import type { Region } from "../types";
 type Tool = "point" | "box";
 type Box = { minLon: number; minLat: number; maxLon: number; maxLat: number };
 
-const CENTER: [number, number] = [16.5, 79.7]; // Andhra Pradesh / Telangana
+const CENTER: [number, number] = [22.5, 80.5]; // India
 const MAX_BOX_DEGREES = 2; // mirrors backend/app/schemas.py
 const GRID_STEP = 0.25; // ERA5 grid, mirrors backend/app/services/grid.py
 // Stroke and fill come from the accent colour in CSS (.map-shape), so they follow the theme.
@@ -124,7 +124,7 @@ export function MapSelector({ value, onPick }: Props) {
           ))}
         </div>
       </div>
-      <MapContainer center={CENTER} zoom={6} minZoom={2} className="map" worldCopyJump scrollWheelZoom={false}>
+      <MapContainer center={CENTER} zoom={5} minZoom={2} className="map" worldCopyJump scrollWheelZoom={false}>
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

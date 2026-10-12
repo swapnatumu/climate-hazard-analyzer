@@ -71,6 +71,11 @@ export interface AnalysisResult {
     start_label: string; start_value: number; end_label: string; end_value: number;
   };
   caveats: string[];
+  /** Gaps in the analysed range, and values removed by cleaning across all loaded data. */
+  data_quality: {
+    variable: string; days: number; missing_days: number; incomplete_years: number[];
+    out_of_range_removed: number; duplicates_removed: number;
+  };
   source: string;
   algo_version: string;
   computed_at: string;

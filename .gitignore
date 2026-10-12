@@ -35,3 +35,6 @@ yarn-error.log*
 *.swp
 .DS_Store
 Thumbs.db
+
+# Session notes (not part of the submission)
+context.md

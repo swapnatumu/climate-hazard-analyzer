@@ -1,4 +1,5 @@
 import httpx
+import pandas as pd
 import pytest
 
 from app.config import Settings
@@ -42,6 +43,9 @@ async def test_heatwave_point_analysis_and_cache(ctx):
     assert len(body["yearly"]) == 41
     assert body["threshold"]["baseline"] == [1991, 2020]
     assert "insight" in body and body["insight"]
+    assert body["data_quality"] == {"variable": "tmax", "days": 14976, "missing_days": 0,
+                                    "incomplete_years": [], "out_of_range_removed": 0,
+                                    "duplicates_removed": 0}
     # Synthetic data warms steadily, so the trend should be significant and upward.
     assert body["trend"]["direction"] == "increasing"
     calls = upstream.calls
@@ -106,10 +110,37 @@ async def test_rate_limit_returns_429(ctx):
     assert statuses[-1] == 429
 
 
+async def test_rate_limit_ignores_forged_forwarded_for(ctx):
+    client, _ = ctx
+    last = None
+    for i in range(61):
+        last = await client.get("/api/geocode", params={"q": "pune"},
+                                headers={"X-Forwarded-For": f"10.0.0.{i}"})
+    assert last.status_code == 429
+    assert last.headers["retry-after"] == "60"
+
+
+def test_client_ip_prefers_configured_proxy_header(monkeypatch):
+    from starlette.requests import Request
+
+    from app import limiter as lim
+
+    scope = {"type": "http", "client": ("10.1.1.1", 1234),
+             "headers": [(b"cf-connecting-ip", b"203.0.113.7"), (b"x-forwarded-for", b"6.6.6.6")]}
+    assert lim.client_ip(Request(scope)) == "10.1.1.1"
+    monkeypatch.setattr(lim, "get_settings", lambda: Settings(client_ip_header="CF-Connecting-IP"))
+    assert lim.client_ip(Request(scope)) == "203.0.113.7"
+
+
 async def test_presets_are_valid_regions(ctx):
     client, _ = ctx
     body = (await client.get("/api/regions")).json()
-    assert {c["id"] for c in body["cities"]} >= {"hyderabad", "visakhapatnam"}
+    cities = body["cities"]
+    assert {c["id"] for c in cities} >= {"hyderabad", "visakhapatnam", "mumbai", "new-delhi"}
+    assert len({c["id"] for c in cities}) == len(cities)
+    assert len({c["state"] for c in cities}) == 36  # 28 states + 8 union territories
+    # Rough bounding box of India, including the island territories.
+    assert all(6 <= c["lat"] <= 36 and 68 <= c["lon"] <= 98 for c in cities)
     # Every preset area must pass the API's own bbox validation.
     for a in body["areas"]:
         r = await client.get("/api/hazards/heatwave",
@@ -153,3 +184,25 @@ async def test_unused_params_share_one_cached_result(ctx):
     second = (await client.get("/api/hazards/drought", params={**base, "percentile": 99, "min_days": 5})).json()
     assert second["cache"] == "hit"
     assert second["id"] == first["id"]
+
+
+async def test_data_quality_reports_removed_and_missing_values(ctx):
+    client, upstream = ctx
+    clean = upstream.fetch_daily
+
+    async def noisy(lat, lon, start, end):
+        df = await clean(lat, lon, start, end)
+        df.loc[df["date"] == "2000-06-01", "tmax"] = 99.0   # outlier -> NaN
+        df.loc[df["date"] == "2001-06-01", "tmax"] = None   # gap
+        dup = df[df["date"] == "2002-06-01"]
+        return pd.concat([df, dup], ignore_index=True)       # duplicate date
+
+    upstream.fetch_daily = noisy
+    params = {"lat": 18.5, "lon": 73.75, "start": 1995, "end": 2010}
+    dq = (await client.get("/api/hazards/heatwave", params=params)).json()["data_quality"]
+    assert dq["out_of_range_removed"] == 1
+    assert dq["duplicates_removed"] == 1
+    assert dq["missing_days"] == 2  # the gap plus the removed outlier
+    # Served again from the raw cache: the counts come from the stored documents.
+    dq2 = (await client.get("/api/hazards/heatwave", params={**params, "start": 1996})).json()["data_quality"]
+    assert dq2["out_of_range_removed"] == 1 and dq2["duplicates_removed"] == 1

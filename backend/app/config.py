@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:5173"
 
     # Bump this whenever hazard logic changes; it invalidates cached analyses.
-    algo_version: str = "1.1.0"
+    algo_version: str = "1.2.0"
 
     # Fixed WMO climate normal used for percentile thresholds.
     baseline_start: int = 1991
@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     upstream_timeout_s: float = 10.0
     upstream_max_concurrency: int = 4
     upstream_max_retries: int = 3
+
+    # Header a trusted proxy sets to the client address (e.g. "CF-Connecting-IP" on Render).
+    # Empty: use the socket peer address.
+    client_ip_header: str = ""
 
     # Per-client rate limits (slowapi syntax)
     rate_limit_analysis: str = "30/minute"

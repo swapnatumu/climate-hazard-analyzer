@@ -74,6 +74,10 @@ async def export_csv(
     th = result["threshold"]
     w.writerow([f"# threshold {th['value']} {th['unit']} ({th['description']}, "
                 f"baseline {th['baseline'][0]}-{th['baseline'][1]}), source {result['source']}"])
+    dq = result["data_quality"]
+    w.writerow([f"# data quality: {dq['missing_days']} of {dq['days']} days missing ({dq['variable']}), "
+                f"{dq['out_of_range_removed']} out-of-range values and "
+                f"{dq['duplicates_removed']} duplicate dates removed"])
     rows = result["yearly"]
     w.writerow(rows[0].keys())
     for r in rows:

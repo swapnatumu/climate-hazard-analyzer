@@ -1,10 +1,11 @@
-"""Pre-warm the cache for the preset AP/Telangana cities (default heatwave, 1990-2020).
+"""Pre-warm the cache for the preset cities (default heatwave, 1990-2020).
 
 Run from backend/ against a running API:
     python scripts/seed.py --api http://localhost:8000
 Requests are sequential. Open-Meteo weights calls by days requested, so decades of daily
 data for one cell uses a large share of the free per-minute quota: when the API answers
-503 (UPSTREAM_RATE_LIMITED) the script waits and retries the same city.
+503 (UPSTREAM_RATE_LIMITED) the script waits and retries the same city. Seeding every
+preset takes a while for that reason; use --state to seed part of the list.
 """
 
 import argparse
@@ -24,10 +25,12 @@ def main() -> None:
     ap.add_argument("--start", type=int, default=1990)
     ap.add_argument("--end", type=int, default=2020)
     ap.add_argument("--max-waits", type=int, default=5, help="retries per city when rate-limited")
+    ap.add_argument("--state", action="append", help="only this state (repeatable)")
     args = ap.parse_args()
+    cities = [c for c in CITIES if not args.state or c["state"] in args.state]
 
     with httpx.Client(base_url=args.api, timeout=120) as client:
-        for c in CITIES:
+        for c in cities:
             params = {"lat": c["lat"], "lon": c["lon"], "start": args.start, "end": args.end}
             r = client.get("/api/hazards/heatwave", params=params)
             for _ in range(args.max_waits):

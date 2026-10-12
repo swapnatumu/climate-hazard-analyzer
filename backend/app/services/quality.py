@@ -1,7 +1,7 @@
 """Validation and cleaning of raw daily weather before it is stored or analyzed."""
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -22,6 +22,9 @@ class QualityReport:
     missing: int = 0
     out_of_range: int = 0
     duplicates: int = 0
+    # Per-year counts, so each stored cell-year document records what was removed from it.
+    out_of_range_by_year: dict[int, int] = field(default_factory=dict)
+    duplicates_by_year: dict[int, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, int]:
         return {"missing": self.missing, "out_of_range": self.out_of_range,
@@ -36,9 +39,10 @@ def clean_daily(raw: pd.DataFrame) -> tuple[pd.DataFrame, QualityReport]:
     report = QualityReport()
     df = raw.copy()
     df["date"] = pd.to_datetime(df["date"])
-    before = len(df)
-    df = df.drop_duplicates(subset="date", keep="first").sort_values("date")
-    report.duplicates = before - len(df)
+    dup = df.duplicated(subset="date", keep="first")
+    report.duplicates = int(dup.sum())
+    report.duplicates_by_year = _by_year(dup, df["date"].dt.year)
+    df = df[~dup].sort_values("date")
 
     # Trailing nulls are ERA5's publication lag, not real gaps: trim them.
     value_cols = [c for c in BOUNDS if c in df.columns]
@@ -60,9 +64,16 @@ def clean_daily(raw: pd.DataFrame) -> tuple[pd.DataFrame, QualityReport]:
         if n_bad:
             log.warning("quality: %d %s values out of range [%s, %s] set to NaN", n_bad, col, lo, hi)
             df.loc[bad, col] = np.nan
+            for y, n in _by_year(bad, df.index.year).items():
+                report.out_of_range_by_year[y] = report.out_of_range_by_year.get(y, 0) + n
         report.out_of_range += n_bad
 
     return df, report
+
+
+def _by_year(mask: pd.Series, years) -> dict[int, int]:
+    counts = mask.groupby(np.asarray(years)).sum()
+    return {int(y): int(n) for y, n in counts.items() if n}
 
 
 def complete_years(df: pd.DataFrame, column: str, years: list[int]) -> dict[int, bool]:

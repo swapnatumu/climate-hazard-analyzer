@@ -9,6 +9,7 @@ def test_out_of_range_set_to_nan_and_counted():
     df, rep = clean_daily(raw)
     assert np.isnan(df.loc["2000-01-01", "tmax"])
     assert rep.out_of_range == 1
+    assert rep.out_of_range_by_year == {2000: 1}
 
 
 def test_duplicates_dropped_and_gaps_reindexed():
@@ -16,6 +17,7 @@ def test_duplicates_dropped_and_gaps_reindexed():
                         "tmax": [30.0, 31.0, 99.0]})
     df, rep = clean_daily(raw)
     assert rep.duplicates == 1
+    assert rep.duplicates_by_year == {2000: 1}
     assert list(df.index.strftime("%Y-%m-%d")) == ["2000-01-01", "2000-01-02", "2000-01-03"]
     assert np.isnan(df.loc["2000-01-02", "tmax"])
 

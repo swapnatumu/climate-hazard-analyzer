@@ -114,6 +114,7 @@ button.primary:hover:not(:disabled) { box-shadow: 0 8px 22px color-mix(in srgb, 
 .theme-toggle svg { transition: transform 0.4s ease; }
 .theme-toggle:hover svg { transform: rotate(30deg); }
 
+.preset select + select { margin-top: 8px; }
 .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
 .tab { font-size: 0.85rem; padding: 5px 10px; }
 .tab.active { background: var(--text); color: var(--card); border-color: var(--text); }

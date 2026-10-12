@@ -38,16 +38,22 @@ export function RegionPicker({ value, onChange }: Props) {
 
 function PresetPicker({ onPick }: { onPick: (r: Region) => void }) {
   const { data, error } = useQuery({ queryKey: ["regions"], queryFn: api.regions, staleTime: Infinity });
+  const [state, setState] = useState("");
   if (error) return <p className="error small">{(error as Error).message}</p>;
   if (!data) return <p className="muted small">Loading presets…</p>;
+
+  // States and union territories in the order the API lists them.
+  const states = [...new Set(data.cities.map((c) => c.state))];
+  const cities = data.cities.filter((c) => c.state === state);
+  const areas = data.areas.filter((a) => a.state === state);
 
   const pick = (value: string) => {
     const [kind, id] = value.split(":");
     if (kind === "city") {
-      const c = data.cities.find((x) => x.id === id);
+      const c = cities.find((x) => x.id === id);
       if (c) onPick({ kind: "point", lat: c.lat, lon: c.lon, label: `${c.name}, ${c.state}` });
     } else {
-      const a = data.areas.find((x) => x.id === id);
+      const a = areas.find((x) => x.id === id);
       if (a) {
         const [minLon, minLat, maxLon, maxLat] = a.bbox;
         onPick({ kind: "bbox", minLon, minLat, maxLon, maxLat, label: `${a.name} (area average)` });
@@ -56,25 +62,28 @@ function PresetPicker({ onPick }: { onPick: (r: Region) => void }) {
   };
 
   return (
-    <div>
-      <select defaultValue="" onChange={(e) => pick(e.target.value)} aria-label="Preset region">
-        <option value="" disabled>Choose a city or area…</option>
-        {["Telangana", "Andhra Pradesh"].map((state) => (
-          <optgroup key={state} label={`${state}: cities`}>
-            {data.cities.filter((c) => c.state === state).map((c) => (
-              <option key={c.id} value={`city:${c.id}`}>{c.name}</option>
-            ))}
-          </optgroup>
-        ))}
-        {["Telangana", "Andhra Pradesh"].map((state) => (
-          <optgroup key={`${state}-areas`} label={`${state}: areas`}>
-            {data.areas.filter((a) => a.state === state).map((a) => (
-              <option key={a.id} value={`area:${a.id}`}>{a.name}</option>
-            ))}
-          </optgroup>
-        ))}
+    <div className="preset">
+      <select value={state} onChange={(e) => setState(e.target.value)} aria-label="State or union territory">
+        <option value="" disabled>Choose a state…</option>
+        {states.map((s) => <option key={s} value={s}>{s}</option>)}
       </select>
-      <p className="muted small">Areas are approximate rectangles, not official boundaries.</p>
+      {/* Keyed by state so the city choice resets when the state changes. */}
+      <select key={state} defaultValue="" disabled={!state} onChange={(e) => pick(e.target.value)}
+        aria-label="City or area">
+        <option value="" disabled>{state ? "Choose a city…" : "Pick a state first"}</option>
+        <optgroup label="Cities">
+          {cities.map((c) => <option key={c.id} value={`city:${c.id}`}>{c.name}</option>)}
+        </optgroup>
+        {areas.length > 0 && (
+          <optgroup label="Areas (box average)">
+            {areas.map((a) => <option key={a.id} value={`area:${a.id}`}>{a.name}</option>)}
+          </optgroup>
+        )}
+      </select>
+      <p className="muted small">
+        Main cities of each state. A state as a whole is too large to average into one series;
+        areas are approximate rectangles, not official boundaries.
+      </p>
     </div>
   );
 }

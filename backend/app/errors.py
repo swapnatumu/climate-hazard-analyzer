@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
+from app.limiter import client_ip
 from app.services.analysis import InsufficientData
 from app.services.open_meteo import UpstreamError
 
@@ -41,9 +42,10 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(RateLimitExceeded)
-    async def _rate(_: Request, exc: RateLimitExceeded):
+    async def _rate(request: Request, exc: RateLimitExceeded):
+        log.warning("rate limit hit by %s on %s", client_ip(request), request.url.path)
         return JSONResponse(_body("RATE_LIMITED", f"Too many requests: {exc.detail}"),
-                            status_code=429)
+                            status_code=429, headers={"Retry-After": "60"})
 
     @app.exception_handler(UpstreamError)
     async def _upstream(_: Request, exc: UpstreamError):

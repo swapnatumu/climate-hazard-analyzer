@@ -16,7 +16,7 @@ from app.hazards.registry import HAZARDS
 from app.schemas import AnalysisQuery
 from app.services.grid import Cell, bbox_cells, snap_point
 from app.services.open_meteo import OpenMeteoClient
-from app.services.quality import clean_daily, complete_years
+from app.services.quality import QualityReport, clean_daily, complete_years
 from app.stats.insight import build_insight
 from app.stats.trend import analyze_trend, rolling_mean
 
@@ -27,6 +27,7 @@ UNITS = {"tmax": "°C", "tmin": "°C", "prcp": "mm"}
 TOP_EVENTS = 5
 MAX_EVENTS = 400  # cap on the per-event list sent to the client
 ROLLING_WINDOW = 5
+REMOVED_KEYS = ("out_of_range", "duplicates")  # counted per cell-year at ingest
 
 
 def hazard_params(hazard, q: AnalysisQuery) -> dict:
@@ -51,7 +52,8 @@ class AnalysisService:
 
     # ---------- raw data ----------
 
-    async def load_cell(self, cell: Cell, years: list[int]) -> pd.DataFrame:
+    async def load_cell(self, cell: Cell, years: list[int]) -> tuple[pd.DataFrame, dict[str, int]]:
+        """Daily frame for one cell plus what cleaning removed from those years."""
         async with self._cell_locks[cell.key]:
             docs = await self.weather.get_years(cell, years)
             missing = sorted(set(years) - docs.keys())
@@ -60,18 +62,22 @@ class AnalysisService:
                 raw = await self.upstream.fetch_daily(
                     cell.lat, cell.lon, date(missing[0], 1, 1), date(missing[-1], 12, 31)
                 )
-                df, _ = clean_daily(raw)
-                new_docs = _year_docs(cell, df, missing)
+                df, report = clean_daily(raw)
+                new_docs = _year_docs(cell, df, report, missing)
                 await self.weather.upsert_years(new_docs)
                 docs.update({d["year"]: d for d in new_docs})
-        return _docs_to_frame([docs[y] for y in years if y in docs])
+        used = [docs[y] for y in years if y in docs]
+        removed = {k: sum(d.get("quality", {}).get(k, 0) for d in used) for k in REMOVED_KEYS}
+        return _docs_to_frame(used), removed
 
-    async def load_region(self, cells: list[Cell], years: list[int]) -> pd.DataFrame:
-        frames = await asyncio.gather(*(self.load_cell(c, years) for c in cells))
+    async def load_region(self, cells: list[Cell], years: list[int]) -> tuple[pd.DataFrame, dict[str, int]]:
+        loaded = await asyncio.gather(*(self.load_cell(c, years) for c in cells))
+        frames = [f for f, _ in loaded]
+        removed = {k: sum(r[k] for _, r in loaded) for k in REMOVED_KEYS}
         if len(frames) == 1:
-            return frames[0]
+            return frames[0], removed
         # Bounding box: spatial mean across sampled cells (smooths local extremes).
-        return pd.concat(frames).groupby(level=0).mean()
+        return pd.concat(frames).groupby(level=0).mean(), removed
 
     # ---------- analysis ----------
 
@@ -108,12 +114,14 @@ class AnalysisService:
 
         b0, b1 = self.settings.baseline_start, self.settings.baseline_end
         years = sorted(set(range(b0, b1 + 1)) | set(range(q.start, q.end + 1)))
-        df = await self.load_region(cells, years)
+        df, removed = await self.load_region(cells, years)
 
         try:
             result = await asyncio.to_thread(self._compute, hazard_key, df, q, (b0, b1))
         except ValueError as e:
             raise InsufficientData(str(e)) from e
+        # Counts cover every cell and year loaded (baseline and requested range).
+        result["data_quality"].update({f"{k}_removed": n for k, n in removed.items()})
         result.update({"_id": key, "region": region, "cache": "miss"})
         await self.results.put(result)
         return result
@@ -136,6 +144,7 @@ class AnalysisService:
         incomplete = [y for y, ok in complete.items() if not ok]
         yearly.loc[incomplete] = np.nan
 
+        expected_days = pd.date_range(f"{q.start}-01-01", f"{q.end}-12-31", freq="D")
         metric = hazard.primary_metric
         series = yearly[metric]
         caveats = [
@@ -181,6 +190,12 @@ class AnalysisService:
             "insight": insight,
             "comparison": comparison,
             "caveats": caveats,
+            "data_quality": {
+                "variable": hazard.variables[0],
+                "days": len(expected_days),
+                "missing_days": int(range_df[hazard.variables[0]].reindex(expected_days).isna().sum()),
+                "incomplete_years": incomplete,
+            },
             "source": SOURCE,
             "algo_version": self.settings.algo_version,
             "computed_at": datetime.now(timezone.utc).isoformat(),
@@ -219,7 +234,7 @@ def _num(v) -> float | None:
     return None if np.isnan(f) else round(f, 3)
 
 
-def _year_docs(cell: Cell, df: pd.DataFrame, years: list[int]) -> list[dict]:
+def _year_docs(cell: Cell, df: pd.DataFrame, report: QualityReport, years: list[int]) -> list[dict]:
     now = datetime.now(timezone.utc)
     docs = []
     for y in years:
@@ -236,7 +251,9 @@ def _year_docs(cell: Cell, df: pd.DataFrame, years: list[int]) -> list[dict]:
             "units": UNITS,
             "dates_start": f"{y}-01-01",
             **arrays,
-            "quality": {"missing": missing},
+            "quality": {"missing": missing,
+                        "out_of_range": report.out_of_range_by_year.get(y, 0),
+                        "duplicates": report.duplicates_by_year.get(y, 0)},
             "fetched_at": now,
         })
     return docs

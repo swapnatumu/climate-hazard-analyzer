@@ -9,6 +9,12 @@ spells) and heavy rainfall.
 > charts per hazard, an insight card and CSV export. Not yet done: PDF export, SPI-based
 > drought, calendar-day heatwave thresholds.
 
+**Live:** [app](https://climate-hazard-analyzer-gold.vercel.app) ·
+[API docs](https://climate-hazard-api-sh76.onrender.com/docs) · demo video **TODO**
+
+The backend is on a free host that sleeps when idle, so the first request can take about a
+minute.
+
 ## Tech stack
 
 | Layer | Choice |
@@ -27,6 +33,21 @@ spells) and heavy rainfall.
 > Deviation from the plan: the plan named `motor`. Motor is deprecated in favour of PyMongo's
 > built-in async API (`AsyncMongoClient`), so the backend uses that instead. Same driver
 > team, near-identical API.
+
+## Data source
+
+Daily maximum temperature, minimum temperature and precipitation from the
+[Open-Meteo historical weather API](https://open-meteo.com/en/docs/historical-weather-api),
+which serves the ERA5 reanalysis from the Copernicus Climate Change Service.
+
+- Coverage: 1940 to the last complete year, worldwide, on a 0.25° grid (about 25 km).
+- Why this one: no API key, one request returns decades of daily values for a cell, and
+  reanalysis has no station gaps, so every place has the same record length. NOAA NCEI
+  station data is closer to what a thermometer measured but has gaps and uneven coverage
+  in India; the Copernicus CDS itself needs an account and queued file downloads.
+- Cost of that choice: a grid cell is an area average, so peaks are lower than at a
+  station, and precipitation is less reliable than temperature (see Known limitations).
+- Geocoding for city search also comes from Open-Meteo.
 
 ## Architecture
 
@@ -54,7 +75,7 @@ Request flow for `GET /api/hazards/heatwave`:
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/health` | Liveness; also wakes a sleeping Render instance |
-| GET | `/api/regions` | Preset cities and areas for Andhra Pradesh and Telangana |
+| GET | `/api/regions` | Preset cities for every Indian state and union territory, plus a few area boxes |
 | GET | `/api/geocode?q=pune` | City search via Open-Meteo, cached in-process (24 h) |
 | GET | `/api/hazards` | Available hazards and defaults |
 | GET | `/api/hazards/{hazard}?lat=&lon=&start=&end=` | Analysis for a point |
@@ -66,7 +87,7 @@ default 3; heatwave), `threshold_mode` (`annual` only for now). A hazard ignores
 parameters it does not use, and they are left out of its cache key.
 
 Errors always look like `{"error": {"code": "VALIDATION_ERROR", "message": "..."}}`.
-Status codes: 422 validation, 404 unknown hazard, 429 rate-limited, 502/504 upstream
+Status codes: 422 validation, 404 unknown hazard, 429 rate-limited (with `Retry-After`), 502/504 upstream
 failure/timeout, 503 (`UPSTREAM_RATE_LIMITED`, with `Retry-After`) when Open-Meteo's free
 quota is temporarily used up.
 
@@ -143,14 +164,23 @@ year and time of year.
 `backend/app/services/quality.py`: explicit °C / mm units, physical bounds → NaN and
 counted, duplicate dates dropped, reindexed to a continuous daily calendar, trailing nulls
 (ERA5 publication lag) trimmed, year completeness check. Every stored doc carries `source`,
-`units`, `quality` and `fetched_at`.
+`units`, `quality` (missing, out-of-range and duplicate counts for that cell-year) and
+`fetched_at`.
+
+Each analysis response has a `data_quality` block: days missing in the requested range for
+the hazard's variable, the years excluded as incomplete, and how many out-of-range values
+and duplicate dates were removed from the data it loaded. The insight card and the CSV
+export show the same numbers.
 
 ## Security and performance
 
 - Every query param is a typed Pydantic field; unknown params are rejected (`extra=forbid`).
 - Mongo queries are built only from validated scalars (no `$` operator injection).
 - Geocode query capped at 100 chars and URL-encoded by httpx.
-- Per-IP limits: 30/min analysis, 60/min geocode. Outbound: semaphore of 4 concurrent
+- Per-IP limits: 30/min analysis, 60/min geocode. The client address is never taken from
+  `X-Forwarded-For`, which a client can forge to get a fresh quota per request. It comes
+  from the header named in `CLIENT_IP_HEADER` (`CF-Connecting-IP` on Render, set by
+  Cloudflare), or from the socket when that is unset. Outbound: semaphore of 4 concurrent
   Open-Meteo calls, 10 s timeout, up to 3 attempts on 5xx/timeouts with jittered backoff.
   An upstream 429 is not retried (its quota windows are a minute or longer): the API fails
   fast with a 503 and `Retry-After`. Cells fetched before the limit stay cached, so a retry
@@ -215,14 +245,13 @@ Local MongoDB quickly: `docker run -d -p 27017:27017 mongo:7`.
 
 ## Deployment
 
-Links: deployed app **TODO** · API docs **TODO** (`/docs`) · demo video **TODO**
-
 1. **Database (MongoDB Atlas M0):** create a database user with read/write on the `climate`
    database only. Render's free tier has no static outbound IP, so network access allows
    `0.0.0.0/0`; the credentials are the protection.
 2. **Backend (Render):** New → Blueprint → this repo. `render.yaml` sets the root directory,
    build and start commands, health check and Python version. Set `MONGODB_URI` (Atlas
-   connection string) and `ALLOWED_ORIGINS` in the dashboard.
+   connection string) and `ALLOWED_ORIGINS` in the dashboard. `CLIENT_IP_HEADER` comes from
+   `render.yaml`.
 3. **Frontend (Vercel):** import the repo with root directory `frontend` (Vite is detected:
    build `npm run build`, output `dist/`). Set `VITE_API_BASE_URL` to the Render URL.
 4. Put the Vercel URL in Render's `ALLOWED_ORIGINS` (no trailing slash) and redeploy.
@@ -237,10 +266,14 @@ Links: deployed app **TODO** · API docs **TODO** (`/docs`) · demo video **TODO
 5. Events are assigned to their start year; incomplete years are excluded.
 6. Missing days end a heatwave run; no interpolation.
 7. "Trend plots" from the API = plot-ready JSON series (`yearly[].rolling_mean`, `trend_line`).
-8. Region focus: Andhra Pradesh and Telangana. Preset cities (Hyderabad, Visakhapatnam,
-   Vijayawada, Warangal, Tirupati, …) and preset areas (Godavari delta, Rayalaseema, …) live
-   in `backend/app/regions.py`. Areas are approximate rectangles, not official boundaries;
-   whole states are not offered. Any other place still works via city search, lat/lon, or box.
+8. Regions: the brief asks for "city, state, or a custom lat-lon box". Presets are chosen
+   by state and then city: one to four main cities for each of the 28 states and 8 union
+   territories (`backend/app/regions.py`). A whole state is not analysed as one region,
+   because averaging daily weather over an area that size (Rajasthan spans desert and
+   hills) hides the extremes this app is looking for; the 2°×2° box cap exists for the same
+   reason. A few preset area boxes are provided for Andhra Pradesh and Telangana; they are
+   approximate rectangles, not official boundaries. Any other place works via city search,
+   lat/lon, a typed box, or the map.
 
 ## Known limitations
 
@@ -255,7 +288,8 @@ Links: deployed app **TODO** · API docs **TODO** (`/docs`) · demo video **TODO
 - An event still running on Dec 31 of the last selected year is cut at the range end.
 - Open-Meteo's free tier weights each call by the days requested, so decades of daily data
   for one cell uses a large share of the per-minute quota. A box over many uncached cells
-  can need a few retries a minute apart (progress is cached); preset cities are pre-warmed.
+  can need a few retries a minute apart (progress is cached). The first analysis of a
+  preset city that nobody has opened yet makes one upstream fetch.
 - Free hosting: the Render instance sleeps after 15 minutes idle (about a minute to wake)
   and Atlas M0 stores 512 MB, enough for a few hundred cells.
 

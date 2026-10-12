@@ -6,14 +6,17 @@ services:
     plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    # Proxy headers so per-IP rate limiting sees the real client address.
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: MONGODB_DB
         value: climate
+      # Per-IP rate limiting reads the client address from this header. Cloudflare (in front
+      # of Render) overwrites it on every request; X-Forwarded-For can be forged by the client.
+      - key: CLIENT_IP_HEADER
+        value: CF-Connecting-IP
       # Set these two in the Render dashboard; they are never committed.
       - key: MONGODB_URI
         sync: false

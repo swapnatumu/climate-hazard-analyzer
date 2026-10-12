@@ -46,6 +46,9 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(UpstreamError)
     async def _upstream(_: Request, exc: UpstreamError):
+        if exc.rate_limited:
+            return JSONResponse(_body("UPSTREAM_RATE_LIMITED", str(exc)), status_code=503,
+                                headers={"Retry-After": "60"})
         return JSONResponse(_body("UPSTREAM_TIMEOUT" if exc.timeout else "UPSTREAM_ERROR",
                                   str(exc)), status_code=504 if exc.timeout else 502)
 

@@ -4,6 +4,7 @@ import pytest
 from app.config import Settings
 from app.limiter import limiter
 from app.main import Deps, create_app
+from app.services.open_meteo import UpstreamError
 from tests.fakes import FakeOpenMeteo, MemoryResultRepo, MemoryWeatherRepo
 
 
@@ -114,3 +115,16 @@ async def test_presets_are_valid_regions(ctx):
         r = await client.get("/api/hazards/heatwave",
                              params={"bbox": ",".join(map(str, a["bbox"])), "start": 1990, "end": 2020})
         assert r.status_code == 200, (a["id"], r.text)
+
+
+async def test_upstream_rate_limit_returns_503_with_retry_after(ctx):
+    client, upstream = ctx
+
+    async def limited(*args, **kwargs):
+        raise UpstreamError("quota used up", rate_limited=True)
+
+    upstream.fetch_daily = limited
+    r = await client.get("/api/hazards/heatwave", params={"lat": 18.5, "lon": 73.75})
+    assert r.status_code == 503
+    assert r.headers["retry-after"] == "60"
+    assert r.json()["error"]["code"] == "UPSTREAM_RATE_LIMITED"

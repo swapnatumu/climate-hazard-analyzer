@@ -1,13 +1,12 @@
-<<<<<<< HEAD
 # Climate Hazard Trend Analyzer
 
 A web app that analyzes historical daily weather for a selected region and shows how
 climate hazards have changed over time. Heatwave is the default (and currently only) hazard.
 
-> **Status:** Phases 0–4 of the implementation plan are scaffolded and run end to end
-> against synthetic data. Not yet done: live check against Open-Meteo, MongoDB Atlas,
-> deployment, Leaflet map, PDF export, drought/rainfall. Sections marked **TODO** get filled
-> in as the build progresses.
+> **Status:** the heatwave analysis works end to end against live Open-Meteo (ERA5) data,
+> with city search, presets, a Leaflet map (point and box), three charts, an insight card
+> and CSV export. Not yet done: deployment (config is ready, see below), PDF export,
+> drought and heavy-rainfall hazards.
 
 ## Tech stack
 
@@ -15,13 +14,14 @@ climate hazards have changed over time. Heatwave is the default (and currently o
 |---|---|
 | Frontend | React 18 + Vite + TypeScript |
 | Charts | Chart.js via `react-chartjs-2` |
+| Map | `react-leaflet` with OpenStreetMap tiles (no API key) |
 | Client cache | TanStack Query (1 h stale time) |
-| Backend | FastAPI (Python 3.11+) |
+| Backend | FastAPI (Python 3.10+) |
 | HTTP client | `httpx` + `tenacity` (timeouts, retries with backoff + jitter) |
 | Analysis | `pandas`, `numpy`, `scipy`, `pymannkendall` |
 | Rate limiting | `slowapi` (per IP) |
 | Database | MongoDB (Atlas M0 or local) via PyMongo's native async client |
-| Hosting | Vercel (frontend), Render (backend) — **TODO** |
+| Hosting | Vercel (frontend), Render (backend) |
 
 > Deviation from the plan: the plan named `motor`. Motor is deprecated in favour of PyMongo's
 > built-in async API (`AsyncMongoClient`), so the backend uses that instead. Same driver
@@ -64,7 +64,9 @@ Optional params: `percentile` (90–99, default 95), `min_days` (2–7, default 
 `threshold_mode` (`annual` only for now).
 
 Errors always look like `{"error": {"code": "VALIDATION_ERROR", "message": "..."}}`.
-Status codes: 422 validation, 404 unknown hazard, 429 rate-limited, 502/504 upstream failure/timeout.
+Status codes: 422 validation, 404 unknown hazard, 429 rate-limited, 502/504 upstream
+failure/timeout, 503 (`UPSTREAM_RATE_LIMITED`, with `Retry-After`) when Open-Meteo's free
+quota is temporarily used up.
 
 Interactive docs: `http://localhost:8000/docs`.
 
@@ -102,7 +104,10 @@ counted, duplicate dates dropped, reindexed to a continuous daily calendar, trai
 - Mongo queries are built only from validated scalars (no `$` operator injection).
 - Geocode query capped at 100 chars and URL-encoded by httpx.
 - Per-IP limits: 30/min analysis, 60/min geocode. Outbound: semaphore of 4 concurrent
-  Open-Meteo calls, 10 s timeout, up to 3 attempts on 429/5xx/timeouts with jittered backoff.
+  Open-Meteo calls, 10 s timeout, up to 3 attempts on 5xx/timeouts with jittered backoff.
+  An upstream 429 is not retried (its quota windows are a minute or longer): the API fails
+  fast with a 503 and `Retry-After`. Cells fetched before the limit stay cached, so a retry
+  continues where it stopped.
 - CORS restricted to `ALLOWED_ORIGINS`; GET only.
 - Pandas work is vectorized (run-length detection via `np.diff`) and runs off the event loop.
 
@@ -126,13 +131,14 @@ frontend/
   src/
     api/client.ts      typed fetch wrappers
     hooks/useHazard.ts TanStack Query hook + "waking server" state
-    components/        RegionPicker, Charts, InsightCard, TopEvents
+    components/        RegionPicker, MapSelector, Charts, InsightCard, TopEvents
     App.tsx, types.ts
+render.yaml            Render blueprint for the backend
 ```
 
 ## Setup
 
-Prerequisites: Python 3.11+, Node 20+, MongoDB (local or Atlas M0).
+Prerequisites: Python 3.10+, Node 20+, MongoDB (local or Atlas M0).
 
 ```bash
 # backend
@@ -157,13 +163,20 @@ cd backend && python scripts/seed.py --api http://localhost:8000
 
 Local MongoDB quickly: `docker run -d -p 27017:27017 mongo:7`.
 
-## Deployment — TODO
+## Deployment
 
-- Backend (Render): start command
-  `uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'`
-  (proxy headers so rate limiting sees the real client IP).
-- Frontend (Vercel): build `npm run build`, output `dist/`, set `VITE_API_BASE_URL`.
-- Add the Vercel domain to `ALLOWED_ORIGINS`.
+Links: deployed app **TODO** · API docs **TODO** (`/docs`) · demo video **TODO**
+
+1. **Database (MongoDB Atlas M0):** create a database user with read/write on the `climate`
+   database only. Render's free tier has no static outbound IP, so network access allows
+   `0.0.0.0/0`; the credentials are the protection.
+2. **Backend (Render):** New → Blueprint → this repo. `render.yaml` sets the root directory,
+   build and start commands, health check and Python version. Set `MONGODB_URI` (Atlas
+   connection string) and `ALLOWED_ORIGINS` in the dashboard.
+3. **Frontend (Vercel):** import the repo with root directory `frontend` (Vite is detected:
+   build `npm run build`, output `dist/`). Set `VITE_API_BASE_URL` to the Render URL.
+4. Put the Vercel URL in Render's `ALLOWED_ORIGINS` (no trailing slash) and redeploy.
+5. Pre-warm the demo cities: `python scripts/seed.py --api https://<render-url>`.
 
 ## Assumptions
 
@@ -186,19 +199,37 @@ Local MongoDB quickly: `docker run -d -p 27017:27017 mongo:7`.
 - Bbox averaging underestimates local extremes.
 - Rate limiter and geocode cache are in-process (fine for one instance; Redis for more).
 - An event still running on Dec 31 of the last selected year is cut at the range end.
+- Open-Meteo's free tier weights each call by the days requested, so decades of daily data
+  for one cell uses a large share of the per-minute quota. A box over many uncached cells
+  can need a few retries a minute apart (progress is cached); preset cities are pre-warmed.
+- Free hosting: the Render instance sleeps after 15 minutes idle (about a minute to wake)
+  and Atlas M0 stores 512 MB, enough for a few hundred cells.
 
-## What I would improve with more time — TODO
+## What I would improve with more time
 
-## AI tools used — TODO
+- Validate ERA5 against NOAA GHCN-Daily station data for selected cities and show the bias.
+- Add drought (consecutive dry days, then SPI-3) and heavy rainfall (R95p, Rx1day), plus a
+  calendar-day threshold mode so unusually warm winter spells count too.
+- For boxes, detect events per grid cell and show the share of the area affected, instead
+  of averaging first.
+- A heatwave definition that also uses Tmin, since hot nights matter for health.
+- Fetch data in a background job with progress polling, so a cold box does not depend on
+  one request staying inside the upstream quota.
+- Redis for rate limiting and request coalescing across multiple instances.
+- Confidence intervals on Sen's slope and a pre-whitened Mann-Kendall test for
+  autocorrelation.
+- PDF export, end-to-end tests (Playwright), CI, and keyboard-accessible map controls.
+
+## AI tools used
 
 | Tool | How it was used |
 |---|---|
-| Claude (Anthropic) | Analyzing the case study, drafting the plan; scaffolding backend/frontend code. **TODO:** note what you reviewed, rewrote, and verified by hand. |
+| Claude (Anthropic), chat | Analyzing the case study, comparing data sources, drafting the hazard definitions, architecture and implementation plan. |
+| Claude Code | Scaffolding the backend and frontend from that plan, the Leaflet map selector, the upstream rate-limit handling and its tests, `render.yaml`, and this README. |
+
+**TODO:** note what you reviewed, rewrote and verified by hand.
 
 ---
 
 *Weather data by [Open-Meteo.com](https://open-meteo.com/), licensed under CC BY 4.0.
 ERA5 data from the Copernicus Climate Change Service.*
-=======
-# climate-hazard-analyzer
->>>>>>> 5bb77c0206e2c0e3b59cb778792cfcfb1478b56f

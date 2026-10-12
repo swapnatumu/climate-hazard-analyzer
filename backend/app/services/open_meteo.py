@@ -25,18 +25,21 @@ DAILY_VARS = {
 
 
 class UpstreamError(Exception):
-    """Upstream API failed (maps to 502) or timed out (maps to 504)."""
+    """Upstream API failed (502), timed out (504) or rate-limited us (503)."""
 
-    def __init__(self, message: str, timeout: bool = False):
+    def __init__(self, message: str, timeout: bool = False, rate_limited: bool = False):
         super().__init__(message)
         self.timeout = timeout
+        self.rate_limited = rate_limited
 
 
 def _retryable(exc: BaseException) -> bool:
     if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
         return True
     if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code == 429 or exc.response.status_code >= 500
+        # 429 is not retried: Open-Meteo's quota windows are a minute or longer, so a
+        # few seconds of backoff cannot succeed and only holds the request open.
+        return exc.response.status_code >= 500
     return False
 
 
@@ -64,6 +67,16 @@ class OpenMeteoClient:
                     return resp.json()
         except httpx.TimeoutException as e:
             raise UpstreamError("Weather data provider timed out", timeout=True) from e
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                log.warning("open-meteo rate limit hit: %s", e.response.text[:200])
+                raise UpstreamError(
+                    "The weather data provider's free request quota is used up for the moment. "
+                    "Data fetched so far is saved; try again in a minute.",
+                    rate_limited=True,
+                ) from e
+            log.warning("open-meteo request failed: %s", e)
+            raise UpstreamError("Weather data provider is unavailable") from e
         except httpx.HTTPError as e:
             log.warning("open-meteo request failed: %s", e)
             raise UpstreamError("Weather data provider is unavailable") from e

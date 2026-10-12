@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Climate Hazard Trend Analyzer
 
 A web app that analyzes historical daily weather for a selected region and shows how
@@ -198,3 +199,6 @@ Local MongoDB quickly: `docker run -d -p 27017:27017 mongo:7`.
 
 *Weather data by [Open-Meteo.com](https://open-meteo.com/), licensed under CC BY 4.0.
 ERA5 data from the Copernicus Climate Change Service.*
+=======
+# climate-hazard-analyzer
+>>>>>>> 5bb77c0206e2c0e3b59cb778792cfcfb1478b56f

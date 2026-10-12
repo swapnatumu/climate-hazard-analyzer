@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:5173"
 
     # Bump this whenever hazard logic changes; it invalidates cached analyses.
-    algo_version: str = "1.0.0"
+    algo_version: str = "1.1.0"
 
     # Fixed WMO climate normal used for percentile thresholds.
     baseline_start: int = 1991

@@ -2,10 +2,9 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { GeocodeResult, Region } from "../types";
-import { MapSelector } from "./MapSelector";
 
-type Mode = "preset" | "city" | "map" | "point" | "bbox";
-const TAB_LABELS: Record<Mode, string> = { preset: "AP / TS", city: "City", map: "Map", point: "Lat / Lon", bbox: "Box" };
+type Mode = "preset" | "city" | "point" | "bbox";
+const TAB_LABELS: Record<Mode, string> = { preset: "Presets", city: "Search", point: "Lat / Lon", bbox: "Box" };
 
 interface Props {
   value: Region | null;
@@ -28,10 +27,11 @@ export function RegionPicker({ value, onChange }: Props) {
       </div>
       {mode === "preset" && <PresetPicker onPick={onChange} />}
       {mode === "city" && <CitySearch onPick={onChange} />}
-      {mode === "map" && <MapSelector value={value} onPick={onChange} />}
       {mode === "point" && <PointForm onSubmit={onChange} />}
       {mode === "bbox" && <BboxForm onSubmit={onChange} />}
-      {value && <p className="muted small">Selected: {value.label}</p>}
+      {value
+        ? <p className="selected small">Selected: {value.label}</p>
+        : <p className="muted small">Or click the map to choose a point or draw a box.</p>}
     </fieldset>
   );
 }

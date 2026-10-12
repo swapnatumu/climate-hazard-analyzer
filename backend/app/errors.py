@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
+from app.services.analysis import InsufficientData
 from app.services.open_meteo import UpstreamError
 
 log = logging.getLogger(__name__)
@@ -51,6 +52,10 @@ def register_error_handlers(app: FastAPI) -> None:
                                 headers={"Retry-After": "60"})
         return JSONResponse(_body("UPSTREAM_TIMEOUT" if exc.timeout else "UPSTREAM_ERROR",
                                   str(exc)), status_code=504 if exc.timeout else 502)
+
+    @app.exception_handler(InsufficientData)
+    async def _insufficient(_: Request, exc: InsufficientData):
+        return JSONResponse(_body("INSUFFICIENT_DATA", str(exc)), status_code=422)
 
     @app.exception_handler(Exception)
     async def _unhandled(_: Request, exc: Exception):

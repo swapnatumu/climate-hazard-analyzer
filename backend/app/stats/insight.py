@@ -17,6 +17,8 @@ METRIC_PHRASES = {
     "event_count": ("Heatwave events", "per year", "events"),
     "heatwave_days": ("Heatwave days", "per year", "days"),
     "excess_heat": ("Excess heat", "°C·days per year", "°C·days"),
+    "max_dry_spell": ("The longest dry spell of the year", "days", "days"),
+    "heavy_days": ("Heavy-rain days", "per year", "days"),
 }
 
 

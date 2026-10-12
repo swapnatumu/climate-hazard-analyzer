@@ -1,12 +1,13 @@
 # Climate Hazard Trend Analyzer
 
 A web app that analyzes historical daily weather for a selected region and shows how
-climate hazards have changed over time. Heatwave is the default (and currently only) hazard.
+climate hazards have changed over time. Three hazards: heatwave (default), drought (dry
+spells) and heavy rainfall.
 
-> **Status:** the heatwave analysis works end to end against live Open-Meteo (ERA5) data,
-> with city search, presets, a Leaflet map (point and box), three charts, an insight card
-> and CSV export. Not yet done: deployment (config is ready, see below), PDF export,
-> drought and heavy-rainfall hazards.
+> **Status:** heatwave, drought and heavy-rainfall analyses work end to end against live
+> Open-Meteo (ERA5) data, with city search, presets, a Leaflet map (point and box), six
+> charts per hazard, an insight card and CSV export. Not yet done: PDF export, SPI-based
+> drought, calendar-day heatwave thresholds.
 
 ## Tech stack
 
@@ -60,8 +61,9 @@ Request flow for `GET /api/hazards/heatwave`:
 | GET | `/api/hazards/{hazard}?bbox=minLon,minLat,maxLon,maxLat&start=&end=` | Analysis for a box (≤ 2°×2°, ≤ 25 sampled cells) |
 | GET | `/api/hazards/{hazard}/export.csv?...` | Yearly metrics as CSV |
 
-Optional params: `percentile` (90–99, default 95), `min_days` (2–7, default 3),
-`threshold_mode` (`annual` only for now).
+Optional params: `percentile` (90–99, default 95; heatwave and rainfall), `min_days` (2–7,
+default 3; heatwave), `threshold_mode` (`annual` only for now). A hazard ignores the
+parameters it does not use, and they are left out of its cache key.
 
 Errors always look like `{"error": {"code": "VALIDATION_ERROR", "message": "..."}}`.
 Status codes: 422 validation, 404 unknown hazard, 429 rate-limited, 502/504 upstream
@@ -82,6 +84,51 @@ baseline** (annual threshold). Code: `backend/app/hazards/heatwave.py`.
 - Per event: `peak_tmax`, `mean_exceedance`, `excess_heat` (°C·days above threshold).
 - Per year: `event_count`, `heatwave_days`, `mean_duration`, `max_duration`,
   `mean_intensity`, `peak_tmax`, `excess_heat`.
+
+## Hazard logic: drought (dry spells)
+
+Version 1 of the plan's drought hazard: consecutive dry days. Code: `backend/app/hazards/drought.py`.
+
+- A dry day has less than 1 mm of precipitation (fixed, not a percentile).
+- Headline metric `max_dry_spell`: the longest run of dry days **inside each calendar year**.
+  A dry season that crosses New Year is split in two, so every year is measured the same
+  way and the last year of the range is not cut short.
+- Per year also: `dry_days`, `total_precip`, `precip_anomaly_pct` (annual rainfall against
+  the 1991–2020 mean) and `dry_spell_count`.
+- Events are dry spells of 20+ days, detected across year boundaries and assigned to their
+  start year. A missing day ends a spell.
+
+## Hazard logic: heavy rainfall
+
+ETCCDI-style R95p. Code: `backend/app/hazards/rainfall.py`.
+
+- Threshold = 95th percentile of baseline **wet days** (≥ 1 mm). Using all days would put
+  the threshold near zero anywhere with a long dry season.
+- Headline metric `heavy_days`: days per year above the threshold.
+- Per year also: `heavy_precip` and `other_precip` (mm on heavy days and on the rest),
+  `heavy_share_pct`, `rx1day` and `rx5day` (wettest day and wettest 5-day total).
+- Events are runs of consecutive heavy days, so a multi-day storm is one event.
+
+## Charts
+
+Each hazard has its own set, defined in `frontend/src/hazardViews.ts` and drawn by
+`components/Charts.tsx`: bars with a 5-year rolling mean and Sen's trend line, filled
+lines, plain lines against the threshold, a diverging bar (rainfall above/below the
+baseline), a stacked bar (heavy rain as part of the annual total), a monthly profile
+comparing the first and second half of the range, and a bubble chart of every event by
+year and time of year.
+
+## Interface
+
+- Light and dark themes with a header toggle; the first visit follows the OS setting and
+  the choice is remembered. Chart colours are re-stepped per theme (`frontend/src/theme.tsx`).
+- One accent colour per hazard, applied to the whole page from the hazard picker.
+- A wide map that is always visible: click a point, draw a box, or pick a preset and the
+  map flies to it.
+- Results open with four headline tiles (threshold, events, first vs last decade, trend).
+  The decade change is greyed out when the trend is not statistically significant.
+- Motion is limited to entrances, count-ups, loading skeletons and hover feedback, and is
+  switched off under `prefers-reduced-motion`.
 
 ## Trend and insight
 
@@ -124,14 +171,17 @@ backend/
     api/               hazards.py, geocode.py
     db/                mongo.py (client, indexes), repositories.py
     services/          open_meteo.py, quality.py, grid.py, analysis.py
-    hazards/           base.py, registry.py, heatwave.py
+    hazards/           base.py, registry.py, heatwave.py, drought.py, rainfall.py
     stats/             trend.py, insight.py
   tests/               unit + API tests (Mongo and Open-Meteo faked)
 frontend/
   src/
     api/client.ts      typed fetch wrappers
     hooks/useHazard.ts TanStack Query hook + "waking server" state
-    components/        RegionPicker, MapSelector, Charts, InsightCard, TopEvents
+    components/        HazardPicker, RegionPicker, MapSelector, Welcome, StatTiles,
+                       Charts, InsightCard, TopEvents, Icons
+    theme.tsx          light/dark theme and chart palettes
+    hazardViews.ts     charts and table columns per hazard
     App.tsx, types.ts
 render.yaml            Render blueprint for the backend
 ```
@@ -196,6 +246,10 @@ Links: deployed app **TODO** · API docs **TODO** (`/docs`) · demo video **TODO
 
 - ERA5 smooths peaks vs. stations and misses urban heat islands.
 - A fixed annual threshold mostly detects summer heat.
+- Reanalysis precipitation is less reliable than temperature and smooths local downpours,
+  so drought and heavy-rainfall results carry more uncertainty than heatwave results.
+- Calendar-year dry spells split a dry season that crosses New Year; in monsoon climates
+  the yearly figure is mostly the January-to-monsoon stretch.
 - Bbox averaging underestimates local extremes.
 - Rate limiter and geocode cache are in-process (fine for one instance; Redis for more).
 - An event still running on Dec 31 of the last selected year is cut at the range end.
@@ -208,8 +262,8 @@ Links: deployed app **TODO** · API docs **TODO** (`/docs`) · demo video **TODO
 ## What I would improve with more time
 
 - Validate ERA5 against NOAA GHCN-Daily station data for selected cities and show the bias.
-- Add drought (consecutive dry days, then SPI-3) and heavy rainfall (R95p, Rx1day), plus a
-  calendar-day threshold mode so unusually warm winter spells count too.
+- SPI-3 / SPEI for drought (dry spells say nothing about how much rain a wet season
+  brought), and a calendar-day heatwave threshold so unusually warm winter spells count too.
 - For boxes, detect events per grid cell and show the share of the area affected, instead
   of averaging first.
 - A heatwave definition that also uses Tmin, since hot nights matter for health.
@@ -225,7 +279,7 @@ Links: deployed app **TODO** · API docs **TODO** (`/docs`) · demo video **TODO
 | Tool | How it was used |
 |---|---|
 | Claude (Anthropic), chat | Analyzing the case study, comparing data sources, drafting the hazard definitions, architecture and implementation plan. |
-| Claude Code | Scaffolding the backend and frontend from that plan, the Leaflet map selector, the upstream rate-limit handling and its tests, `render.yaml`, and this README. |
+| Claude Code | Scaffolding the backend and frontend from that plan, the Leaflet map selector, the drought and heavy-rainfall hazards and their charts, the upstream rate-limit handling, tests, `render.yaml`, and this README. |
 
 **TODO:** note what you reviewed, rewrote and verified by hand.
 

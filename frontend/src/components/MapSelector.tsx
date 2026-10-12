@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { CircleMarker, MapContainer, Rectangle, TileLayer, useMapEvents } from "react-leaflet";
+import { useEffect, useState } from "react";
+import { CircleMarker, MapContainer, Rectangle, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import type { LatLng, LatLngBoundsExpression } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { Region } from "../types";
@@ -10,8 +10,9 @@ type Box = { minLon: number; minLat: number; maxLon: number; maxLat: number };
 const CENTER: [number, number] = [16.5, 79.7]; // Andhra Pradesh / Telangana
 const MAX_BOX_DEGREES = 2; // mirrors backend/app/schemas.py
 const GRID_STEP = 0.25; // ERA5 grid, mirrors backend/app/services/grid.py
-const STYLE = { color: "#c2410c", weight: 2, fillOpacity: 0.12 };
-const TOO_BIG_STYLE = { color: "#5d6676", weight: 2, fillOpacity: 0.08, dashArray: "4" };
+// Stroke and fill come from the accent colour in CSS (.map-shape), so they follow the theme.
+const STYLE = { className: "map-shape", weight: 2, fillOpacity: 0.15 };
+const TOO_BIG_STYLE = { className: "map-shape too-big", weight: 2, fillOpacity: 0.08, dashArray: "4" };
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const snap = (n: number) => Math.round(n / GRID_STEP) * GRID_STEP;
@@ -33,6 +34,23 @@ function MapEvents({ onClick, onMove }: { onClick: (p: LatLng) => void; onMove?:
     click: (e) => onClick(e.latlng.wrap()),
     mousemove: (e) => onMove?.(e.latlng.wrap()),
   });
+  return null;
+}
+
+/** Brings a region picked elsewhere (preset, search, form) into view. */
+function FlyToRegion({ value }: { value: Region | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!value) return;
+    const animate = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (value.kind === "point") {
+      if (!map.getBounds().pad(-0.2).contains([value.lat, value.lon])) {
+        map.flyTo([value.lat, value.lon], Math.max(map.getZoom(), 7), { animate, duration: 0.8 });
+      }
+    } else {
+      map.flyToBounds(bounds(value), { animate, duration: 0.8, padding: [40, 40], maxZoom: 9 });
+    }
+  }, [map, value]);
   return null;
 }
 
@@ -84,36 +102,40 @@ export function MapSelector({ value, onPick }: Props) {
     ? { minLat: snap(value.lat) - GRID_STEP / 2, maxLat: snap(value.lat) + GRID_STEP / 2,
         minLon: snap(value.lon) - GRID_STEP / 2, maxLon: snap(value.lon) + GRID_STEP / 2 }
     : null;
+  const hint = tool === "point"
+    ? "Click anywhere. The square is the ~25 km ERA5 grid cell the data comes from."
+    : corner
+      ? "Now click the opposite corner."
+      : `Click two opposite corners. Max ${MAX_BOX_DEGREES}° × ${MAX_BOX_DEGREES}°, averaged over up to 25 grid cells.`;
 
   return (
-    <div>
-      <div className="tabs">
-        {(["point", "box"] as Tool[]).map((t) => (
-          <button key={t} type="button" aria-pressed={tool === t}
-            className={tool === t ? "tab active" : "tab"} onClick={() => switchTool(t)}>
-            {t === "point" ? "Click a point" : "Draw a box"}
-          </button>
-        ))}
+    <section className="card map-card">
+      <div className="map-head">
+        <div>
+          <h3>{value ? value.label : "Choose a place on the map"}</h3>
+          <p className={error ? "error small" : "muted small"}>{error ?? hint}</p>
+        </div>
+        <div className="tabs">
+          {(["point", "box"] as Tool[]).map((t) => (
+            <button key={t} type="button" aria-pressed={tool === t}
+              className={tool === t ? "tab active" : "tab"} onClick={() => switchTool(t)}>
+              {t === "point" ? "Point" : "Box"}
+            </button>
+          ))}
+        </div>
       </div>
-      <MapContainer center={CENTER} zoom={6} minZoom={2} className="map" worldCopyJump>
+      <MapContainer center={CENTER} zoom={6} minZoom={2} className="map" worldCopyJump scrollWheelZoom={false}>
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
         <MapEvents onClick={handleClick} onMove={corner ? setHover : undefined} />
+        <FlyToRegion value={value} />
         {value?.kind === "point" && <CircleMarker center={[value.lat, value.lon]} radius={6} pathOptions={STYLE} />}
         {cell && <Rectangle bounds={bounds(cell)} pathOptions={STYLE} />}
         {value?.kind === "bbox" && !corner && <Rectangle bounds={bounds(value)} pathOptions={STYLE} />}
         {preview && <Rectangle bounds={bounds(preview)} pathOptions={tooBig(preview) ? TOO_BIG_STYLE : STYLE} />}
       </MapContainer>
-      {error && <p className="error small">{error}</p>}
-      <p className="muted small">
-        {tool === "point"
-          ? "Click anywhere. The square is the ~25 km ERA5 grid cell the data comes from."
-          : corner
-            ? "Now click the opposite corner."
-            : `Click two opposite corners. Max ${MAX_BOX_DEGREES}° × ${MAX_BOX_DEGREES}°, averaged over up to 25 grid cells.`}
-      </p>
-    </div>
+    </section>
   );
 }

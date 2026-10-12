@@ -25,7 +25,13 @@ log = logging.getLogger(__name__)
 SOURCE = "open-meteo/era5"
 UNITS = {"tmax": "°C", "tmin": "°C", "prcp": "mm"}
 TOP_EVENTS = 5
+MAX_EVENTS = 400  # cap on the per-event list sent to the client
 ROLLING_WINDOW = 5
+
+
+def hazard_params(hazard, q: AnalysisQuery) -> dict:
+    """Hazard constants plus only the query parameters this hazard actually reads."""
+    return {**hazard.default_params(), **{k: getattr(q, k) for k in hazard.uses}}
 
 
 class AnalysisService:
@@ -76,8 +82,7 @@ class AnalysisService:
                 "hazard": hazard,
                 "baseline": [self.settings.baseline_start, self.settings.baseline_end],
                 "range": [q.start, q.end],
-                "params": {"percentile": q.percentile, "min_days": q.min_days,
-                           "threshold_mode": q.threshold_mode},
+                "params": hazard_params(HAZARDS[hazard], q),
                 "algo_version": self.settings.algo_version,
             },
             sort_keys=True,
@@ -105,7 +110,10 @@ class AnalysisService:
         years = sorted(set(range(b0, b1 + 1)) | set(range(q.start, q.end + 1)))
         df = await self.load_region(cells, years)
 
-        result = await asyncio.to_thread(self._compute, hazard_key, df, q, (b0, b1))
+        try:
+            result = await asyncio.to_thread(self._compute, hazard_key, df, q, (b0, b1))
+        except ValueError as e:
+            raise InsufficientData(str(e)) from e
         result.update({"_id": key, "region": region, "cache": "miss"})
         await self.results.put(result)
         return result
@@ -113,8 +121,7 @@ class AnalysisService:
     def _compute(self, hazard_key: str, df: pd.DataFrame, q: AnalysisQuery,
                  baseline: tuple[int, int]) -> dict:
         hazard = HAZARDS[hazard_key]
-        params = {"percentile": q.percentile, "min_days": q.min_days,
-                  "threshold_mode": q.threshold_mode}
+        params = hazard_params(hazard, q)
         range_years = list(range(q.start, q.end + 1))
 
         base_df = df.loc[f"{baseline[0]}-01-01":f"{baseline[1]}-12-31"]
@@ -124,7 +131,7 @@ class AnalysisService:
         events = hazard.detect(range_df, th, params)
         complete = complete_years(range_df, hazard.variables[0], range_years)
 
-        yearly = hazard.yearly_metrics(events, range_years)
+        yearly = hazard.yearly_metrics(events, range_years, range_df, th)
         # Incomplete years are excluded from trends (a partial year biases counts down).
         incomplete = [y for y, ok in complete.items() if not ok]
         yearly.loc[incomplete] = np.nan
@@ -134,6 +141,7 @@ class AnalysisService:
         caveats = [
             "ERA5 is a ~25 km grid-cell average; weather-station peaks may be higher.",
         ]
+        caveats += hazard.caveats
         if incomplete:
             caveats.append(f"Excluded {len(incomplete)} incomplete year(s): {incomplete}.")
 
@@ -153,17 +161,22 @@ class AnalysisService:
             row["trend_line"] = _num(fitted.get(y))
             yearly_rows.append(row)
 
-        top = sorted(events, key=lambda e: e.metrics["excess_heat"], reverse=True)[:TOP_EVENTS]
+        ranked = sorted(events, key=lambda e: e.metrics.get(hazard.rank_metric, e.duration),
+                        reverse=True)
+        shown = sorted(ranked[:MAX_EVENTS], key=lambda e: e.start)
         return {
             "hazard": hazard_key,
             "params": {**params, "baseline": list(baseline)},
             "range": [q.start, q.end],
             "threshold": {"value": th.value, "unit": th.unit, "mode": th.mode,
-                          "baseline": list(th.baseline), "percentile": q.percentile},
+                          "baseline": list(th.baseline), "percentile": params.get("percentile"),
+                          "description": th.description, "reference": th.reference},
             "primary_metric": metric,
             "yearly": yearly_rows,
-            "top_events": [e.to_dict() for e in top],
+            "top_events": [e.to_dict() for e in ranked[:TOP_EVENTS]],
+            "events": [e.to_dict() for e in shown],
             "event_total": len(events),
+            "seasonality": _seasonality(hazard, range_df, th, complete),
             "trend": trend.to_dict(),
             "insight": insight,
             "comparison": comparison,
@@ -172,6 +185,31 @@ class AnalysisService:
             "algo_version": self.settings.algo_version,
             "computed_at": datetime.now(timezone.utc).isoformat(),
         }
+
+
+class InsufficientData(Exception):
+    """The data cannot support this analysis (e.g. no wet days in the baseline)."""
+
+
+def _seasonality(hazard, df: pd.DataFrame, th, complete: dict[int, bool]) -> dict | None:
+    """Mean monthly profile for the first and second half of the range (complete years only)."""
+    years = [y for y, ok in complete.items() if ok]
+    if len(years) < 2:
+        return None
+    s = hazard.seasonal(df, th)
+    monthly = (s.groupby([s.index.year, s.index.month]).sum().unstack()
+               .reindex(index=years, columns=range(1, 13)))
+    half = len(years) // 2
+    title, unit = hazard.seasonal_label
+    return {
+        "title": title,
+        "unit": unit,
+        "periods": [
+            {"label": f"{part[0]}–{part[-1]}",
+             "values": [_num(v) for v in monthly.loc[part].mean()]}
+            for part in (years[:half], years[half:])
+        ],
+    }
 
 
 def _num(v) -> float | None:

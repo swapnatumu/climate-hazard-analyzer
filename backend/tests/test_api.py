@@ -128,3 +128,28 @@ async def test_upstream_rate_limit_returns_503_with_retry_after(ctx):
     assert r.status_code == 503
     assert r.headers["retry-after"] == "60"
     assert r.json()["error"]["code"] == "UPSTREAM_RATE_LIMITED"
+
+
+@pytest.mark.parametrize("hazard,metric", [("drought", "max_dry_spell"), ("rainfall", "heavy_days")])
+async def test_other_hazards_analyze_and_export(ctx, hazard, metric):
+    client, _ = ctx
+    params = {"lat": 18.5, "lon": 73.8, "start": 1990, "end": 2020}
+    r = await client.get(f"/api/hazards/{hazard}", params=params)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["primary_metric"] == metric
+    assert body["yearly"][0][metric] is not None
+    assert len(body["seasonality"]["periods"]) == 2
+    assert len(body["seasonality"]["periods"][0]["values"]) == 12
+    csv = await client.get(f"/api/hazards/{hazard}/export.csv", params=params)
+    assert f"year,complete,{metric}" in csv.text
+
+
+async def test_unused_params_share_one_cached_result(ctx):
+    client, _ = ctx
+    base = {"lat": 18.5, "lon": 73.8, "start": 1990, "end": 2020}
+    first = (await client.get("/api/hazards/drought", params=base)).json()
+    # Drought ignores percentile and min_days, so changing them must not recompute.
+    second = (await client.get("/api/hazards/drought", params={**base, "percentile": 99, "min_days": 5})).json()
+    assert second["cache"] == "hit"
+    assert second["id"] == first["id"]

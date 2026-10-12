@@ -38,7 +38,7 @@ async def list_hazards() -> dict:
     return {
         "hazards": [
             {"key": h.key, "label": h.label, "variables": h.variables,
-             "defaults": h.default_params(), "primary_metric": h.primary_metric}
+             "defaults": h.default_params(), "uses": list(h.uses), "primary_metric": h.primary_metric}
             for h in HAZARDS.values()
         ],
         "baseline": [settings.baseline_start, settings.baseline_end],
@@ -72,7 +72,7 @@ async def export_csv(
     w = csv.writer(buf)
     w.writerow([f"# {result['insight']}"])
     th = result["threshold"]
-    w.writerow([f"# threshold {th['value']} {th['unit']} (p{th['percentile']}, "
+    w.writerow([f"# threshold {th['value']} {th['unit']} ({th['description']}, "
                 f"baseline {th['baseline'][0]}-{th['baseline'][1]}), source {result['source']}"])
     rows = result["yearly"]
     w.writerow(rows[0].keys())

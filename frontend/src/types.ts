@@ -13,27 +13,27 @@ export interface AnalysisParams {
   minDays: number;
 }
 
+/** One row per year. Metric columns depend on the hazard (see hazardViews.ts). */
 export interface YearRow {
   year: number;
   complete: boolean;
-  event_count: number | null;
-  heatwave_days: number | null;
-  mean_duration: number | null;
-  max_duration: number | null;
-  mean_intensity: number | null;
-  peak_tmax: number | null;
-  excess_heat: number | null;
   rolling_mean: number | null;
   trend_line: number | null;
+  [metric: string]: number | boolean | null;
 }
 
+/** Start/end/duration plus hazard-specific metrics (e.g. excess_heat, total_precip). */
 export interface HazardEvent {
   start: string;
   end: string;
   duration: number;
-  peak_tmax: number;
-  mean_exceedance: number;
-  excess_heat: number;
+  [metric: string]: number | string;
+}
+
+export interface Seasonality {
+  title: string;
+  unit: string;
+  periods: { label: string; values: (number | null)[] }[];
 }
 
 export interface Trend {
@@ -53,13 +53,23 @@ export interface AnalysisResult {
     | { type: "point"; cell: { lat: number; lon: number }; requested: { lat: number; lon: number } }
     | { type: "bbox"; bbox: [number, number, number, number]; cells: number };
   range: [number, number];
-  threshold: { value: number; unit: string; mode: string; baseline: [number, number]; percentile: number };
+  threshold: {
+    value: number; unit: string; mode: string; baseline: [number, number];
+    percentile: number | null; description: string; reference: Record<string, number>;
+  };
   primary_metric: string;
   yearly: YearRow[];
   top_events: HazardEvent[];
+  events: HazardEvent[];
+  seasonality: Seasonality | null;
   event_total: number;
   trend: Trend;
   insight: string;
+  /** The two values the insight sentence compares. */
+  comparison: {
+    basis: "decade_means" | "trend_line";
+    start_label: string; start_value: number; end_label: string; end_value: number;
+  };
   caveats: string[];
   source: string;
   algo_version: string;

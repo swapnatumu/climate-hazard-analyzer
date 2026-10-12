@@ -9,18 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from app.hazards.base import Event, Threshold
-
-
-def run_lengths(mask: np.ndarray) -> list[tuple[int, int]]:
-    """Return (start_idx, end_idx_inclusive) for every run of True values.
-
-    Vectorized: finds rising/falling edges with np.diff instead of looping per day.
-    """
-    padded = np.concatenate(([False], mask.astype(bool), [False]))
-    edges = np.flatnonzero(np.diff(padded.astype(np.int8)))
-    starts, ends = edges[0::2], edges[1::2] - 1
-    return list(zip(starts.tolist(), ends.tolist()))
+from app.hazards.base import Event, Threshold, run_lengths
 
 
 class Heatwave:
@@ -28,6 +17,10 @@ class Heatwave:
     label = "Heatwave"
     variables = ["tmax"]
     primary_metric = "event_count"
+    uses = ("percentile", "min_days", "threshold_mode")
+    rank_metric = "excess_heat"
+    caveats: list[str] = []
+    seasonal_label = ("Days above the heatwave threshold, by month", "days per year")
 
     def default_params(self) -> dict[str, Any]:
         return {"percentile": 95, "min_days": 3, "threshold_mode": "annual"}
@@ -38,7 +31,8 @@ class Heatwave:
         if tmax.empty:
             raise ValueError("Baseline period has no Tmax data")
         value = float(np.quantile(tmax.to_numpy(), params["percentile"] / 100))
-        return Threshold(value=round(value, 2), unit="°C", baseline=years, mode="annual")
+        return Threshold(value=round(value, 2), unit="°C", baseline=years, mode="annual",
+                         description=f"p{params['percentile']} of daily Tmax")
 
     def detect(self, df: pd.DataFrame, th: Threshold, params: dict[str, Any]) -> list[Event]:
         tmax = df["tmax"].to_numpy(dtype=float)
@@ -65,7 +59,12 @@ class Heatwave:
             )
         return events
 
-    def yearly_metrics(self, events: list[Event], years: list[int]) -> pd.DataFrame:
+    def seasonal(self, df: pd.DataFrame, th: Threshold) -> pd.Series:
+        return (df["tmax"] > th.value).astype(float)
+
+    def yearly_metrics(self, events: list[Event], years: list[int],
+                       df: pd.DataFrame | None = None,
+                       th: Threshold | None = None) -> pd.DataFrame:
         cols = [
             "event_count",
             "heatwave_days",

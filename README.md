@@ -11,7 +11,7 @@ spells) and heavy rainfall.
 
 **Live:** [app](https://climate-hazard-analyzer-gold.vercel.app) ·
 [API docs](https://climate-hazard-api-sh76.onrender.com/docs) · 
-demo video
+[demo video](https://drive.google.com/file/d/1hl5xkHOWrUfwhimphqEd9pgpMjHVQoMV/view?usp=drive_link)
 
 The backend is on a free host that sleeps when idle, so the first request can take about a
 minute.

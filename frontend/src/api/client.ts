@@ -1,5 +1,5 @@
 import type {
-  AnalysisParams, AnalysisResult, ApiErrorBody, GeocodeResult, HazardInfo, PresetArea, PresetCity,
+  AnalysisParams, AnalysisResult, ApiErrorBody, GeocodeResult, HazardInfo, PresetCity,
 } from "../types";
 
 export const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000";
@@ -53,7 +53,7 @@ export const api = {
     getJson<{ hazards: HazardInfo[]; baseline: [number, number]; default: string }>("/api/hazards"),
   analyze: (p: AnalysisParams, signal?: AbortSignal) =>
     getJson<AnalysisResult>(`/api/hazards/${encodeURIComponent(p.hazard)}`, analysisSearchParams(p), signal),
-  regions: () => getJson<{ cities: PresetCity[]; areas: PresetArea[] }>("/api/regions"),
+  regions: () => getJson<{ cities: PresetCity[] }>("/api/regions"),
   geocode: (q: string, signal?: AbortSignal) =>
     getJson<{ results: GeocodeResult[] }>("/api/geocode", new URLSearchParams({ q }), signal),
   csvUrl: (p: AnalysisParams) =>

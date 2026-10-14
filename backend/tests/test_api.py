@@ -132,7 +132,7 @@ def test_client_ip_prefers_configured_proxy_header(monkeypatch):
     assert lim.client_ip(Request(scope)) == "203.0.113.7"
 
 
-async def test_presets_are_valid_regions(ctx):
+async def test_presets_cover_every_state(ctx):
     client, _ = ctx
     body = (await client.get("/api/regions")).json()
     cities = body["cities"]
@@ -141,11 +141,6 @@ async def test_presets_are_valid_regions(ctx):
     assert len({c["state"] for c in cities}) == 36  # 28 states + 8 union territories
     # Rough bounding box of India, including the island territories.
     assert all(6 <= c["lat"] <= 36 and 68 <= c["lon"] <= 98 for c in cities)
-    # Every preset area must pass the API's own bbox validation.
-    for a in body["areas"]:
-        r = await client.get("/api/hazards/heatwave",
-                             params={"bbox": ",".join(map(str, a["bbox"])), "start": 1990, "end": 2020})
-        assert r.status_code == 200, (a["id"], r.text)
 
 
 async def test_upstream_rate_limit_returns_503_with_retry_after(ctx):

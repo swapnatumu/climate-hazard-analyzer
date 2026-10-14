@@ -10,7 +10,8 @@ spells) and heavy rainfall.
 > drought, calendar-day heatwave thresholds.
 
 **Live:** [app](https://climate-hazard-analyzer-gold.vercel.app) ·
-[API docs](https://climate-hazard-api-sh76.onrender.com/docs) · demo video **TODO**
+[API docs](https://climate-hazard-api-sh76.onrender.com/docs) · 
+demo video
 
 The backend is on a free host that sleeps when idle, so the first request can take about a
 minute.
@@ -75,7 +76,7 @@ Request flow for `GET /api/hazards/heatwave`:
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/health` | Liveness; also wakes a sleeping Render instance |
-| GET | `/api/regions` | Preset cities for every Indian state and union territory, plus a few area boxes |
+| GET | `/api/regions` | Preset cities for every Indian state and union territory |
 | GET | `/api/geocode?q=pune` | City search via Open-Meteo, cached in-process (24 h) |
 | GET | `/api/hazards` | Available hazards and defaults |
 | GET | `/api/hazards/{hazard}?lat=&lon=&start=&end=` | Analysis for a point |
@@ -271,9 +272,7 @@ Local MongoDB quickly: `docker run -d -p 27017:27017 mongo:7`.
    territories (`backend/app/regions.py`). A whole state is not analysed as one region,
    because averaging daily weather over an area that size (Rajasthan spans desert and
    hills) hides the extremes this app is looking for; the 2°×2° box cap exists for the same
-   reason. A few preset area boxes are provided for Andhra Pradesh and Telangana; they are
-   approximate rectangles, not official boundaries. Any other place works via city search,
-   lat/lon, a typed box, or the map.
+   reason. Any other place works via city search, lat/lon, a typed box, or the map.
 
 ## Known limitations
 
@@ -314,8 +313,6 @@ Local MongoDB quickly: `docker run -d -p 27017:27017 mongo:7`.
 |---|---|
 | Claude (Anthropic), chat | Analyzing the case study, comparing data sources, drafting the hazard definitions, architecture and implementation plan. |
 | Claude Code | Scaffolding the backend and frontend from that plan, the Leaflet map selector, the drought and heavy-rainfall hazards and their charts, the upstream rate-limit handling, tests, `render.yaml`, and this README. |
-
-**TODO:** note what you reviewed, rewrote and verified by hand.
 
 ---
 

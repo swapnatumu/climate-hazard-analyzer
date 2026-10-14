@@ -45,20 +45,10 @@ function PresetPicker({ onPick }: { onPick: (r: Region) => void }) {
   // States and union territories in the order the API lists them.
   const states = [...new Set(data.cities.map((c) => c.state))];
   const cities = data.cities.filter((c) => c.state === state);
-  const areas = data.areas.filter((a) => a.state === state);
 
-  const pick = (value: string) => {
-    const [kind, id] = value.split(":");
-    if (kind === "city") {
-      const c = cities.find((x) => x.id === id);
-      if (c) onPick({ kind: "point", lat: c.lat, lon: c.lon, label: `${c.name}, ${c.state}` });
-    } else {
-      const a = areas.find((x) => x.id === id);
-      if (a) {
-        const [minLon, minLat, maxLon, maxLat] = a.bbox;
-        onPick({ kind: "bbox", minLon, minLat, maxLon, maxLat, label: `${a.name} (area average)` });
-      }
-    }
+  const pick = (id: string) => {
+    const c = cities.find((x) => x.id === id);
+    if (c) onPick({ kind: "point", lat: c.lat, lon: c.lon, label: `${c.name}, ${c.state}` });
   };
 
   return (
@@ -69,20 +59,12 @@ function PresetPicker({ onPick }: { onPick: (r: Region) => void }) {
       </select>
       {/* Keyed by state so the city choice resets when the state changes. */}
       <select key={state} defaultValue="" disabled={!state} onChange={(e) => pick(e.target.value)}
-        aria-label="City or area">
+        aria-label="City">
         <option value="" disabled>{state ? "Choose a city…" : "Pick a state first"}</option>
-        <optgroup label="Cities">
-          {cities.map((c) => <option key={c.id} value={`city:${c.id}`}>{c.name}</option>)}
-        </optgroup>
-        {areas.length > 0 && (
-          <optgroup label="Areas (box average)">
-            {areas.map((a) => <option key={a.id} value={`area:${a.id}`}>{a.name}</option>)}
-          </optgroup>
-        )}
+        {cities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
       </select>
       <p className="muted small">
-        Main cities of each state. A state as a whole is too large to average into one series;
-        areas are approximate rectangles, not official boundaries.
+        Main cities of each state. A state as a whole is too large to average into one series.
       </p>
     </div>
   );

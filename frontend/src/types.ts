@@ -101,4 +101,3 @@ export interface ApiErrorBody {
 }
 
 export interface PresetCity { id: string; name: string; state: string; lat: number; lon: number }
-export interface PresetArea { id: string; name: string; state: string; bbox: [number, number, number, number] }

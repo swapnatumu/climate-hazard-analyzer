@@ -1,9 +1,7 @@
-"""Preset regions: the main cities of every Indian state and union territory, plus a few
-area boxes for Andhra Pradesh and Telangana.
+"""Preset regions: the main cities of every Indian state and union territory.
 
-Cities are points (snapped to the nearest ERA5 cell). Areas are approximate rectangles
-(not official boundaries), each within the 2°×2° bbox limit.
-Coordinates are approximate city-centre values.
+Cities are points (snapped to the nearest ERA5 cell). Coordinates are approximate
+city-centre values.
 """
 
 CITIES = [
@@ -73,22 +71,3 @@ CITIES = [
     {"id": "puducherry", "name": "Puducherry", "state": "Puducherry", "lat": 11.941, "lon": 79.808},
 ]
 
-# bbox = [minLon, minLat, maxLon, maxLat]
-AREAS = [
-    {"id": "hyderabad-metro", "name": "Hyderabad metro region", "state": "Telangana",
-     "bbox": [78.2, 17.2, 78.8, 17.7]},
-    {"id": "north-telangana", "name": "North Telangana (Nizamabad–Karimnagar)", "state": "Telangana",
-     "bbox": [77.9, 18.2, 79.5, 19.4]},
-    {"id": "south-east-telangana", "name": "South-east Telangana (Nalgonda–Khammam)", "state": "Telangana",
-     "bbox": [79.0, 16.6, 80.6, 17.6]},
-    {"id": "north-coastal-ap", "name": "North Coastal AP (Visakhapatnam–Srikakulam)", "state": "Andhra Pradesh",
-     "bbox": [82.8, 17.5, 84.2, 18.7]},
-    {"id": "godavari-delta", "name": "Godavari delta", "state": "Andhra Pradesh",
-     "bbox": [81.5, 16.3, 82.4, 17.2]},
-    {"id": "krishna-delta", "name": "Krishna delta (Vijayawada–Guntur)", "state": "Andhra Pradesh",
-     "bbox": [80.2, 15.8, 81.3, 16.7]},
-    {"id": "rayalaseema", "name": "Rayalaseema (Kurnool–Anantapur)", "state": "Andhra Pradesh",
-     "bbox": [77.2, 14.3, 78.6, 16.0]},
-    {"id": "south-coastal-ap", "name": "South AP (Tirupati–Nellore)", "state": "Andhra Pradesh",
-     "bbox": [79.2, 13.4, 80.3, 14.8]},
-]

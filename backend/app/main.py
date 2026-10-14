@@ -11,7 +11,7 @@ from app.db.mongo import create_client, ensure_indexes
 from app.db.repositories import MongoResultRepo, MongoWeatherRepo, ResultRepo, WeatherRepo
 from app.errors import register_error_handlers
 from app.limiter import limiter
-from app.regions import AREAS, CITIES
+from app.regions import CITIES
 from app.services.analysis import AnalysisService
 from app.services.open_meteo import OpenMeteoClient
 
@@ -65,8 +65,8 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
 
     @app.get("/api/regions", tags=["meta"])
     async def regions() -> dict:
-        """Preset demo cities and areas (Andhra Pradesh and Telangana)."""
-        return {"cities": CITIES, "areas": AREAS}
+        """Preset cities: the main cities of every Indian state and union territory."""
+        return {"cities": CITIES}
 
     return app
 
